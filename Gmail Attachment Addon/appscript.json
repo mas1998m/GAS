@@ -1,0 +1,33 @@
+{
+    "oauthScopes": [
+      "https://www.googleapis.com/auth/gmail.addons.execute",
+      "https://www.googleapis.com/auth/gmail.addons.current.message.metadata",
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/drive",
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://mail.google.com/"
+    ],
+    "gmail": {
+      "name": "Attachment Downloader",
+      "logoUrl": "https://cdn-icons-png.flaticon.com/512/237/237510.png",
+      "contextualTriggers": [
+        {
+          "unconditional": {},
+          "onTriggerFunction": "onGmailMessageOpen"
+        }
+      ],
+      "openLinkUrlPrefixes": [
+        "https://mail.google.com/"
+      ],
+      "primaryColor": "#4285F4",
+      "secondaryColor": "#4285F4"
+    },
+    "runtimeVersion": "V8",
+    "webapp": {
+      "executeAs": "USER_ACCESSING",
+      "access": "ANYONE"
+    },
+    "executionApi": {
+      "access": "ANYONE"
+    }
+  }

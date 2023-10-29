@@ -1,0 +1,309 @@
+// Source: https://github.com/choraria/google-apps-script/blob/master/Sheets/Webhooks/GET.gs
+
+const documentProperties = PropertiesService.getDocumentProperties();
+let ok200Status = false; // replace '%200OKSTATUS%' from the add-on to either `true` or `false` (boolean)
+let logTimeStamp = true; // replace '%LOGTIMESTAMP%' from the add-on to either `true` or `false` (boolean)
+
+function onOpen(e) {
+  if (documentProperties.getProperty('Authorized') !== 'true') {
+    const ui = SpreadsheetApp.getUi();
+    ui.createMenu('Webhooks')
+      .addItem('Authorize', 'authorizeScript')
+      .addToUi();
+  }
+}
+
+function authorizeScript() {
+  SpreadsheetApp.getActiveSpreadsheet().toast('Authorization successful.', "🪝 Webhooks for Sheets");
+  documentProperties.setProperty('Authorized', 'true');
+}
+
+function doGet(e) {
+  Logger.log(e);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(28000);
+  } catch (e) {
+    response = {
+      status: 'error',
+      message: 'Request throttled'
+    }
+    return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  let params = e.parameters;
+
+  const activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const allSheets = activeSpreadsheet.getSheets();
+
+  const activeSheetsAndNewParams = gidHandlerForGet(params, activeSpreadsheet, allSheets);
+  const activeSheets = activeSheetsAndNewParams.activeSheetNames;
+  params = activeSheetsAndNewParams.revisedParameters;
+
+  let keys = Object.keys(params);
+  let response = {};
+  let result;
+  let kaleyra;
+
+  if (keys.length > 0) {
+    logTimeStamp === true ? params["timestamp_incoming_webhook"] = [new Date()] : null;
+    keys = Object.keys(params);
+    const cartesianData = cartesian(params);
+
+    activeSheets.forEach(activeSheetName => {
+      let activeSheet = activeSpreadsheet.getSheetByName(activeSheetName);
+      let headers = activeSheet.getDataRange().offset(0, 0, 1).getValues()[0];
+      if (headers.length == 0 || (headers.length == 1 && headers[0].length == 0)) {
+        activeSheet.appendRow(keys);
+        activeSheet.setFrozenRows(1);
+        if (logTimeStamp === true) {
+          activeSheet.moveColumns(activeSheet.getRange(1, keys.indexOf("timestamp_incoming_webhook") + 1), 1);
+          SpreadsheetApp.flush();
+          //activeSheet.getRange("A:A").setNumberFormat('dd/MM/yyyy HH:mm:ss');
+          headers = activeSheet.getDataRange().offset(0, 0, 1).getValues()[0];
+        } else {
+          headers = keys;
+        }
+      }
+
+      let rowData = [];
+
+      rowFound = checkValid(e.parameters["Phone"]);
+      if(rowFound == -1){
+
+        cartesianData.forEach(rowLevelData => [rowLevelData].map(row => rowData.push(headers.map(key => row[String(key)] || ''))));
+        activeSheet.getRange(activeSheet.getLastRow() + 1, 1, rowData.length, rowData[0].length).setValues(rowData);
+        activeSheet.getRange(activeSheet.getLastRow(), 9, 1, 1).setValue(params["timestamp_incoming_webhook"][0].getTime());
+        response = {
+          status: 'success',
+          message: 'Data logged successfully '
+        }
+
+        var options = {
+          method: 'post',
+          headers: {
+            'content-type': 'text/json',
+            Authorization: ''
+          },
+          payload: JSON.stringify({broadcast_name: "test",
+                              template_name: 'sarah_2',
+                              parameters: [{name: 'name', value: e.parameters["Name"].toString()}]})
+        };
+        result = UrlFetchApp.fetch('https://live-server-10755.wati.io/api/v1/sendTemplateMessage?whatsappNumber=' +e.parameters["Phone"].toString() , options);
+        result = result.getContentText();
+
+        //get last call time
+        var lastCall = parseInt(activeSheet.getRange(1,12).getValue());
+        var workingHourStart = 5;
+        var workingHourEnd = 13;
+
+        var currentStamp = Date.now();
+        var currentDate = new Date(currentStamp);
+        var scheduleStamp = 0 ;
+
+        if( currentDate.getUTCDay() == 0 || currentDate.getUTCDay() == 6 ){
+          if(currentDate.getUTCDay() == 0 ){
+            currentDate.setUTCDate(currentDate.getUTCDate()+1);
+          }else{
+            currentDate.setUTCDate(currentDate.getUTCDate()+2);
+          }
+          currentDate.setUTCHours(5);
+          currentDate.setUTCMinutes(0);
+          currentDate.setSeconds(0);
+          scheduleStamp = Math.max(lastCall + 2 * 60000, currentDate.getTime());
+          activeSheet.getRange(1,12).setValue(scheduleStamp);
+          activeSheet.getRange(1,13).setValue(currentDate.toUTCString());
+        }else if(currentDate.getUTCHours() > workingHourStart &&  new Date(Date.now() + 30 * 60000).getUTCHours() < workingHourEnd){
+          scheduleStamp = 0;
+          activeSheet.getRange(1,12).setValue(currentDate.getTime()); 
+          activeSheet.getRange(1,13).setValue(currentDate.toUTCString());
+        }else{
+          if(currentDate.getUTCDay() == 5){
+            currentDate.setUTCDate(currentDate.getUTCDate()+3);
+          }else{
+            currentDate.setUTCDate(currentDate.getUTCDate()+1);
+          }
+          currentDate.setUTCHours(5);
+          currentDate.setUTCMinutes(0);
+          currentDate.setSeconds(0);
+          scheduleStamp = Math.max(lastCall + 2 * 60000, currentDate.getTime());
+          activeSheet.getRange(1,13).setValue(currentDate.toUTCString());
+          activeSheet.getRange(1,12).setValue(scheduleStamp);
+        }
+          
+        var calledApi = "https://api-voice.kaleyra.com/v1/?api_key=A5c321084ce22095b89313b6c1d02519f&numbers="+ e.parameters["Phone"].toString() +"&method=voice.call&play=237092.ivr&scheduletime=" + scheduleStamp;
+        kaleyra = UrlFetchApp.fetch(calledApi);
+        kaleyra = kaleyra.getContentText();
+
+      }else{
+        response = {
+          status: 'failed',
+          message: 'Number is duplicate. It was added before in the last 3 days'
+        }
+      }
+     
+
+    })
+
+    
+    lock.releaseLock();
+    return ok200Status === true ?
+      HtmlService.createHtmlOutput('Data logged successfully ').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL) :
+      ContentService.createTextOutput(kaleyra).setMimeType(ContentService.MimeType.JSON);
+  } else {
+    response = {
+      status: 'success',
+      message: 'No parameters detected'
+    }
+    lock.releaseLock();
+    return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+
+function test(){
+var lastCall = parseInt(activeSheet.getRange(2,11).getValue());
+var calledApi = "https://api-voice.kaleyra.com/v1/?api_key=A5c321084ce22095b89313b6c1d02519f&numbers="+ "201121823018" +"&method=voice.call&play=237092.ivr&scheduletime=" + "0";
+var result = UrlFetchApp.fetch(calledApi);
+result = result.getContentText();
+
+
+  var options = {
+          method: 'post',
+          headers: {
+            'content-type': 'text/json',
+            Authorization: ''
+          },
+          payload: JSON.stringify({broadcast_name: "test",
+                              template_name: 'sarah_2',
+                              parameters: [{name: 'name', value: "test"}]})
+        };
+        
+  
+  var result = UrlFetchApp.fetch('https://live-server-10755.wati.io/api/v1/sendTemplateMessage?whatsappNumber=' + "201121823018" , options);
+  result = result.getContentText();
+  ContentService.createTextOutput(JSON.parse(result)).setMimeType(ContentService.MimeType.JSON);
+  var x = 0;
+}
+
+function gidHandlerForGet(params, activeSpreadsheet, allSheets) {
+  let existingSheetIds = [];
+  let getDefaultSheet;
+  let newParameters = {};
+  allSheets.forEach(sheet => existingSheetIds.push(sheet.getSheetId().toString()));
+
+  let defaultWebhookGetSheetId = documentProperties.getProperty('defaultWebhookGetSheetId');
+  let newDefaultWebhookGetSheetName = `[GET] Webhook — ${new Date().getTime().toString()}`;
+
+  let checkDefaultOrCreateNewGetSheet = false;
+
+  let keys = Object.keys(params);
+  if (keys.includes('gid')) {
+    const gidValues = params['gid'];
+    const matchingGids = existingSheetIds.filter(sheetId => gidValues.includes(sheetId));
+    const nonMatchingGids = gidValues.filter(gid => !matchingGids.includes(gid));
+    if (matchingGids.length === 0) {
+      checkDefaultOrCreateNewGetSheet = true;
+    } else {
+      newParameters = params;
+      delete newParameters["gid"];
+      if (nonMatchingGids.length > 0) {
+        newParameters["gid"] = nonMatchingGids;
+      }
+      if (matchingGids.length === 1) {
+        getDefaultSheet = allSheets.filter(sheet => sheet.getSheetId() == matchingGids[0]);
+        return {
+          activeSheetNames: [getDefaultSheet[0].getSheetName()],
+          revisedParameters: newParameters,
+        };
+      } else {
+        let validSheetNames = [];
+        matchingGids.forEach(gid => {
+          getDefaultSheet = allSheets.filter(sheet => sheet.getSheetId() == gid);
+          if (getDefaultSheet.length !== 0) {
+            validSheetNames.push(getDefaultSheet[0].getSheetName())
+          }
+        });
+        return {
+          activeSheetNames: validSheetNames,
+          revisedParameters: newParameters,
+        }
+      }
+    }
+  } else {
+    checkDefaultOrCreateNewGetSheet = true;
+  }
+
+  if (checkDefaultOrCreateNewGetSheet) {
+    if (!defaultWebhookGetSheetId) {
+      defaultWebhookGetSheetId = activeSpreadsheet.insertSheet().setName(newDefaultWebhookGetSheetName).getSheetId().toString();
+      documentProperties.setProperty('defaultWebhookGetSheetId', defaultWebhookGetSheetId);
+      return {
+        activeSheetNames: [newDefaultWebhookGetSheetName],
+        revisedParameters: params,
+      };
+    } else {
+      getDefaultSheet = allSheets.filter(sheet => sheet.getSheetId() == defaultWebhookGetSheetId);
+      if (getDefaultSheet.length !== 0) {
+        return {
+          activeSheetNames: [getDefaultSheet[0].getSheetName()],
+          revisedParameters: params,
+        };
+      } else {
+        defaultWebhookGetSheetId = activeSpreadsheet.insertSheet().setName(newDefaultWebhookGetSheetName).getSheetId().toString();
+        documentProperties.setProperty('defaultWebhookGetSheetId', defaultWebhookGetSheetId);
+        return {
+          activeSheetNames: [newDefaultWebhookGetSheetName],
+          revisedParameters: params,
+        };
+      }
+    }
+  }
+}
+
+function cartesian(parameters) {
+  let keys = Object.keys(parameters);
+  let depth = Object.values(parameters).reduce((product, { length }) => product * length, 1);
+  let result = [];
+  for (let i = 0; i < depth; i++) {
+    let j = i;
+    let dict = {};
+    for (let key of keys) {
+      let size = parameters[key].length;
+      dict[key] = parameters[key][j % size];
+      j = Math.floor(j / size);
+    }
+    result.push(dict);
+  }
+  return result;
+}
+
+
+
+function checkValid(number){
+  
+  var sheet = SpreadsheetApp.getActiveSpreadsheet();
+  sheet = sheet.getActiveSheet()
+  //sheet.getActiveSheet().getRange(2,11).setValue(new Date().getTime());
+  //SpreadsheetApp.flush();
+
+  var lastCall = parseInt(sheet.getRange(1,12).getValue());
+  var data = sheet.getDataRange().getValues();
+  var date = new Date();
+  date.setDate(date.getDate() - 3);
+
+  number = number.toString().slice(-10);
+  
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var rowPhone = row[1]; // Assuming phone number is in the second column
+    var rowDate = parseInt(row[8]);  // Assuming date is in the first column
+    rowPhone = rowPhone.toString().slice(-10);
+    var currStamp = date.getTime();
+    if (rowPhone == number && rowDate >= date.getTime()){
+      return i + 1;
+    }
+  }
+  // Return -1 if no matching row is found
+  return -1;
+}

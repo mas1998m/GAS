@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+</head>
+<body>
+    <form>
+        <input type="file" id="fileInput">
+        <input type="button" value="Upload" onclick="uploadFile()">
+    </form>
+
+    <script>
+        function uploadFile() {
+            var fileInput = document.getElementById("fileInput");
+            var file = fileInput.files[0];
+
+            const fr = new FileReader();
+
+            fr.onload = function(e) {
+                  const obj = {
+                    filename: file.name,
+                    mimeType: file.type,
+                    bytes: [...new Int8Array(e.target.result)]
+                  };
+                google.script.run.withSuccessHandler(e => console.log(e)).saveFileToDrive(obj,"test");
+            };
+            fr.readAsArrayBuffer(file);
+
+
+            // var formData = new FormData();
+            // formData.append("file", file);
+
+        }
+    </script>
+</body>
+</html>
